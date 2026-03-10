@@ -98,6 +98,7 @@ public class Main {
 
     private final nfs4_prot_NFS4_PROGRAM_Client _nfsClient;
     private final Map<deviceid4, FileIoDevice> _knowDevices = new HashMap<>();
+    private final String _clientOwnerId = UUID.randomUUID().toString();
     private nfs_fh4 _cwd = null;
     private nfs_fh4 _rootFh = null;
     // FIXME:
@@ -544,7 +545,8 @@ public class Main {
         String clientid = this.getClass().getCanonicalName() + ": "
                 + ProcessHandle.current().info().user().orElse("<nobody>")
                 + "-"
-                + ProcessHandle.current().pid() + "@" + InetAddress.getLocalHost().getHostName();
+                + ProcessHandle.current().pid() + "@" + InetAddress.getLocalHost().getHostName()
+                + "-" + _clientOwnerId;
 
         COMPOUND4args args = new CompoundBuilder()
                 .withExchangeId(domain, name, clientid, 0, state_protect_how4.SP4_NONE)
@@ -751,6 +753,17 @@ public class Main {
         COMPOUND4res compound4res = sendCompoundInSession(args);
     }
 
+    void mkdirPath(String path) throws OncRpcException, IOException {
+
+        COMPOUND4args args = new CompoundBuilder()
+                .withPutfh(startFh(path))
+                .withLookup(dirname(path))
+                .withMakedir(basename(path))
+                .withTag("mkdir-path")
+                .build();
+        COMPOUND4res compound4res = sendCompoundInSession(args);
+    }
+
     private void get_fs_locations(String path) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
@@ -810,7 +823,6 @@ public class Main {
         }
 
         Optional<fattr4_type> type = attrs.get(nfs4_prot.FATTR4_TYPE);
-        System.out.println("Type is: " + type.get().value);
 
         return stat;
     }
@@ -928,13 +940,17 @@ public class Main {
     }
 
     OpenReply open(String path) throws OncRpcException, IOException {
+        return open(path, nfs4_prot.OPEN4_SHARE_ACCESS_READ);
+    }
+
+    OpenReply open(String path, int access) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
-                .withPutfh(path.charAt(0) == '/' ? _rootFh : _cwd)
+                .withPutfh(startFh(path))
                 .withLookup(dirname(path))
-                .withOpen(basename(path), _sequenceID.value, _clientIdByServer, nfs4_prot.OPEN4_SHARE_ACCESS_READ)
+                .withOpen(basename(path), _sequenceID.value, _clientIdByServer, access)
                 .withGetfh()
-                .withTag("open_read")
+                .withTag("open")
                 .build();
         COMPOUND4res compound4res = sendCompoundInSession(args);
 
@@ -942,7 +958,6 @@ public class Main {
 
         nfs_fh4 fh = compound4res.resarray.get(opCount - 1).opgetfh.resok4.object;
         stateid4 stateid = compound4res.resarray.get(opCount - 2).opopen.resok4.stateid;
-        System.out.println("open_read fh = " + HexFormat.of().formatHex(fh.value));
 
         return new OpenReply(fh, stateid);
     }
@@ -961,7 +976,6 @@ public class Main {
         int opCount = compound4res.resarray.size();
         nfs_fh4 fh = compound4res.resarray.get(opCount - 1).opgetfh.resok4.object;
         stateid4 stateid = compound4res.resarray.get(opCount - 2).opopen.resok4.stateid;
-        System.out.println("open_read fh = " + HexFormat.of().formatHex(fh.value));
 
         return new OpenReply(fh, stateid);
     }
@@ -1331,12 +1345,37 @@ public class Main {
         COMPOUND4res compound4res = sendCompoundInSession(args);
     }
 
+    void renamePath(String oldPath, String newPath) throws OncRpcException, IOException {
+
+        COMPOUND4args args = new CompoundBuilder()
+                .withPutfh(startFh(oldPath))
+                .withLookup(dirname(oldPath))
+                .withSavefh()
+                .withPutfh(startFh(newPath))
+                .withLookup(dirname(newPath))
+                .withRename(basename(oldPath), basename(newPath))
+                .withTag("rename")
+                .build();
+        COMPOUND4res compound4res = sendCompoundInSession(args);
+    }
+
     public void remove(String path) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(_cwd)
                 .withRemove(path)
                 .withTag("remove")
+                .build();
+        COMPOUND4res compound4res = sendCompoundInSession(args);
+    }
+
+    void removePath(String path) throws OncRpcException, IOException {
+
+        COMPOUND4args args = new CompoundBuilder()
+                .withPutfh(startFh(path))
+                .withLookup(dirname(path))
+                .withRemove(basename(path))
+                .withTag("remove-path")
                 .build();
         COMPOUND4res compound4res = sendCompoundInSession(args);
     }
@@ -1433,6 +1472,10 @@ public class Main {
     private static String basename(String path) {
         File f = new File(path);
         return f.getName();
+    }
+
+    private nfs_fh4 startFh(String path) {
+        return path.charAt(0) == '/' ? _rootFh : _cwd;
     }
 
     private static String dirname(String path) {

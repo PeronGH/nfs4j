@@ -51,6 +51,7 @@ import org.dcache.nfs.v4.xdr.PUTFH4args;
 import org.dcache.nfs.v4.xdr.READ4args;
 import org.dcache.nfs.v4.xdr.READDIR4args;
 import org.dcache.nfs.v4.xdr.RECLAIM_COMPLETE4args;
+import org.dcache.nfs.v4.xdr.RENAME4args;
 import org.dcache.nfs.v4.xdr.REMOVE4args;
 import org.dcache.nfs.v4.xdr.REMOVEXATTR4args;
 import org.dcache.nfs.v4.xdr.SEQUENCE4args;
@@ -340,6 +341,18 @@ public class CompoundBuilder {
         return this;
     }
 
+    public CompoundBuilder withRename(String oldName, String newName) {
+        RENAME4args args = new RENAME4args();
+        args.oldname = new component4(oldName);
+        args.newname = new component4(newName);
+
+        nfs_argop4 op = new nfs_argop4();
+        op.argop = nfs_opnum4.OP_RENAME;
+        op.oprename = args;
+        ops.add(op);
+        return this;
+    }
+
     public CompoundBuilder withWrite(long offset, byte[] data, stateid4 stateid) {
         ByteBuffer buf = ByteBuffer.wrap(data);
         return withWrite(offset, buf, stateid);
@@ -520,11 +533,10 @@ public class CompoundBuilder {
 
         op.opopen.seqid = new seqid4(sequenceId);
 
-        // if ((access & nfs4_prot.OPEN4_SHARE_ACCESS_WANT_DELEG_MASK) == 0){
-        // access |= nfs4_prot.OPEN4_SHARE_ACCESS_WANT_NO_DELEG;
-        // }
-        // op.opopen.share_access = new uint32_t(access);
-        op.opopen.share_access = new uint32_t(nfs4_prot.OPEN4_SHARE_ACCESS_READ);
+        if ((access & nfs4_prot.OPEN4_SHARE_ACCESS_WANT_DELEG_MASK) == 0) {
+            access |= nfs4_prot.OPEN4_SHARE_ACCESS_WANT_NO_DELEG;
+        }
+        op.opopen.share_access = new uint32_t(access);
         op.opopen.share_deny = new uint32_t(nfs4_prot.OPEN4_SHARE_DENY_NONE);
 
         state_owner4 owner = new state_owner4();
