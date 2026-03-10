@@ -737,7 +737,7 @@ public class Main {
         return list.toArray(new String[list.size()]);
     }
 
-    private void mkdir(String path) throws OncRpcException, IOException {
+    void mkdir(String path) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(_cwd)
@@ -815,7 +815,7 @@ public class Main {
         return stat;
     }
 
-    private void read(String path, boolean pnfs) throws OncRpcException, IOException {
+    void read(String path, boolean pnfs) throws OncRpcException, IOException {
 
         OpenReply or = open(path);
 
@@ -842,7 +842,7 @@ public class Main {
 
     }
 
-    private void readNoState(String path) throws OncRpcException, IOException {
+    void readNoState(String path) throws OncRpcException, IOException {
         OpenReply or = open(path);
         nfsRead(or.fh(), Stateids.ZeroStateId());
         close(or.fh(), or.stateid());
@@ -867,7 +867,7 @@ public class Main {
         System.out.println("[" + new String(data) + "]");
     }
 
-    private void write(String source, String path, boolean pnfs) throws OncRpcException, IOException {
+    void write(String source, String path, boolean pnfs) throws OncRpcException, IOException {
 
         File f = new File(source);
         if (!f.exists()) {
@@ -927,7 +927,7 @@ public class Main {
         close(or.fh(), or.stateid());
     }
 
-    private OpenReply open(String path) throws OncRpcException, IOException {
+    OpenReply open(String path) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(path.charAt(0) == '/' ? _rootFh : _cwd)
@@ -947,7 +947,7 @@ public class Main {
         return new OpenReply(fh, stateid);
     }
 
-    private OpenReply create(String path) throws OncRpcException, IOException {
+    OpenReply create(String path) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(path.charAt(0) == '/' ? _rootFh : _cwd)
@@ -966,7 +966,7 @@ public class Main {
         return new OpenReply(fh, stateid);
     }
 
-    private void close(nfs_fh4 fh, stateid4 stateid) throws OncRpcException, IOException {
+    void close(nfs_fh4 fh, stateid4 stateid) throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(fh)
@@ -1216,23 +1216,28 @@ public class Main {
         }
     }
 
-    private void nfsRead(nfs_fh4 fh, stateid4 stateid)
+    byte[] readBytes(nfs_fh4 fh, stateid4 stateid, int count, long offset)
             throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
                 .withPutfh(fh)
-                .withRead(4096, 0, stateid)
+                .withRead(count, offset, stateid)
                 .withTag("pNFS read")
                 .build();
         COMPOUND4res compound4res = sendCompoundInSession(args);
 
         byte[] data = new byte[compound4res.resarray.get(2).opread.resok4.data.remaining()];
         compound4res.resarray.get(2).opread.resok4.data.get(data);
-        System.out.println("[" + new String(data) + "]");
-
+        return data;
     }
 
-    private void nfsWrite(nfs_fh4 fh, byte[] data, long offset, stateid4 stateid)
+    private void nfsRead(nfs_fh4 fh, stateid4 stateid)
+            throws OncRpcException, IOException {
+        byte[] data = readBytes(fh, stateid, 4096, 0);
+        System.out.println("[" + new String(data) + "]");
+    }
+
+    int writeBytes(nfs_fh4 fh, byte[] data, long offset, stateid4 stateid)
             throws OncRpcException, IOException {
 
         COMPOUND4args args = new CompoundBuilder()
@@ -1242,6 +1247,57 @@ public class Main {
                 .build();
 
         COMPOUND4res compound4res = sendCompoundInSession(args);
+        return compound4res.resarray.get(2).opwrite.resok4.count.value;
+    }
+
+    private void nfsWrite(nfs_fh4 fh, byte[] data, long offset, stateid4 stateid)
+            throws OncRpcException, IOException {
+        writeBytes(fh, data, offset, stateid);
+    }
+
+    String[] listPath(String path) throws OncRpcException, IOException, ChimeraNFSException {
+        return list(_cwd, path);
+    }
+
+    String[] listCurrent() throws OncRpcException, IOException, ChimeraNFSException {
+        return list(_cwd);
+    }
+
+    Stat statPath(String path) throws OncRpcException, IOException {
+        return stat(lookupHandle(path));
+    }
+
+    nfs_fh4 lookupHandle(String path) throws OncRpcException, IOException {
+        COMPOUND4args args = new CompoundBuilder()
+                .withPutfh(path.charAt(0) == '/' ? _rootFh : _cwd)
+                .withLookup(path)
+                .withGetfh()
+                .withTag("lookup-handle")
+                .build();
+
+        COMPOUND4res compound4res = sendCompoundInSession(args);
+        return compound4res.resarray.get(compound4res.resarray.size() - 1).opgetfh.resok4.object;
+    }
+
+    byte[] readFile(String path, long offset, int count) throws OncRpcException, IOException {
+        OpenReply or = open(path);
+        try {
+            return readBytes(or.fh(), or.stateid(), count, offset);
+        } finally {
+            close(or.fh(), or.stateid());
+        }
+    }
+
+    void writeFile(String path, byte[] data, long offset) throws OncRpcException, IOException {
+        OpenReply or = create(path);
+        try {
+            int written = writeBytes(or.fh(), data, offset, or.stateid());
+            if (written != data.length) {
+                throw new IOException("short write: " + written + " != " + data.length);
+            }
+        } finally {
+            close(or.fh(), or.stateid());
+        }
     }
 
     private void sequence() throws OncRpcException, IOException {
@@ -1338,7 +1394,7 @@ public class Main {
         }
     }
 
-    private static class OpenReply {
+    static final class OpenReply {
 
         private final nfs_fh4 _fh;
         private final stateid4 _stateid;
